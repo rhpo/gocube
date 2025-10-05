@@ -34,6 +34,12 @@ func clear() {
 	fmt.Print("\033[H\033[J")
 }
 
+// wipeScreen clears the screen and prepares it for rendering the next frame.
+//
+// It initializes the zBuffer with positive infinity values to represent the depth of each pixel.
+// The screen is set up as a 2D slice filled with a background value. The origin coordinates are calculated
+// based on the camera's position, and vertical and horizontal lines are drawn to represent the camera's
+// position on the screen. The center of the screen is marked with a "+" symbol if the origin is within bounds.
 func wipeScreen() {
 
 	zBuffer = make([]float64, sW*sH)
@@ -68,6 +74,7 @@ func wipeScreen() {
 	}
 }
 
+// init initializes the application by setting the terminal size and camera position.
 func init() {
 
 	sW, sH, _ = term.GetSize(0)
@@ -95,6 +102,7 @@ func render() {
 	wipeScreen()
 }
 
+// normal rounds a float64 to the nearest integer and returns it as an int.
 func normal(f float64) int {
 	return int(math.Round(f))
 }
@@ -125,6 +133,7 @@ func setPixel(p Point) {
 	}
 }
 
+// setShape sets the pixels of the shape after rotating it.
 func setShape(s Shape) {
 
 	rotated := Rotate(s)
@@ -190,6 +199,11 @@ func Rotate(s Shape) Shape {
 	return result
 }
 
+// generateCubeSurfaces generates a slice of Point structures representing the surfaces of a cube.
+//
+// The function takes a size and density as parameters to determine the dimensions and spacing of the points.
+// It iterates over a predefined set of characters to create points on each of the six faces of the cube,
+// adjusting the coordinates based on the current face being processed. The resulting slice of points is returned.
 func generateCubeSurfaces(size float64, density float64) []Point {
 
 	chars := []string{"#", "@", "+", "x", "o", "%"}
@@ -291,6 +305,7 @@ func generatePyramidSurfaces(size, density float64) []Point {
 	return points
 }
 
+// main is the entry point of the application that initializes a cube and handles its rotation and camera movement.
 func main() {
 
 	var cubeSize = sW / 5
