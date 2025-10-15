@@ -1,5 +1,11 @@
 package main
 
+/*
+#include <unistd.h>
+static long gethz(void) { return sysconf(_SC_CLK_TCK); }
+*/
+import "C"
+
 import (
 	"fmt"
 	"github.com/fatih/color"
@@ -98,7 +104,11 @@ func initTerminalSize() {
 
 func render() {
 	// target ~60 FPS
-	frameDelay := time.Second / 60
+	hz := C.gethz()
+	hzInt := int(hz)
+
+	frameDelay := time.Duration(1/hzInt) * time.Second
+
 	time.Sleep(frameDelay)
 
 	clear()
