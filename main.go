@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"github.com/fatih/color"
+	"golang.org/x/term"
 	"math"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
-
-	"golang.org/x/term"
 )
 
 type Point struct {
@@ -30,12 +33,45 @@ var screen [][]string
 var camera Point
 var zBuffer []float64
 
+const windows = runtime.GOOS == "windows"
+
 func clear() {
-	fmt.Print("\033[H\033[J")
+	// Cross-platform clear
+	if windows {
+		cmd := exec.Command("cmd", "/c", "cls")
+		cmd.Stdout = os.Stdout
+		_ = cmd.Run()
+	} else {
+		// ANSI clear for Unix terminals
+		fmt.Print("\033[H\033[J")
+	}
+}
+
+func drawAxis() {
+	originX := int(float64(sW)/2.0 - camera.x)
+	originY := int(float64(sH)/2.0 - camera.y)
+
+	// vertical axis (|) along columns at originX
+	for i := 0; i < sH; i++ {
+		if originX >= 0 && originX < sW {
+			screen[i][originX] = "|"
+		}
+	}
+
+	// horizontal axis (-) along row originY
+	for j := 0; j < sW; j++ {
+		if originY >= 0 && originY < sH {
+			screen[originY][j] = "-"
+		}
+	}
+
+	// origin point
+	if originY >= 0 && originY < sH && originX >= 0 && originX < sW {
+		screen[originY][originX] = "+"
+	}
 }
 
 func wipeScreen() {
-
 	zBuffer = make([]float64, sW*sH)
 	for i := range zBuffer {
 		zBuffer[i] = math.Inf(1)
@@ -48,41 +84,23 @@ func wipeScreen() {
 			screen[i][j] = background
 		}
 	}
-
-	originX := int(sW/2 - int(camera.x))
-	originY := int(sH/2 - int(camera.y))
-
-	for i := 0; i < sH; i++ {
-		if originX >= 0 && originX < sW {
-			screen[i][originX] = "|"
-		}
-	}
-	for j := 0; j < sW; j++ {
-		if originY >= 0 && originY < sH {
-			screen[originY][j] = "-"
-		}
-	}
-
-	if originY >= 0 && originY < sH && originX >= 0 && originX < sW {
-		screen[originY][originX] = "+"
-	}
 }
 
-func init() {
-
-	sW, sH, _ = term.GetSize(0)
-
-	camera = Point{
-		x: 0,
-		y: 0,
-		z: 20,
+func initTerminalSize() {
+	// Try to get terminal size in a cross-platform way; fallback to defaults.
+	w, h, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || w == 0 || h == 0 {
+		// fallback defaults
+		w, h = 120, 40
 	}
-
-	wipeScreen()
+	sW, sH = w, h
 }
 
 func render() {
-	time.Sleep(15 * time.Millisecond)
+	// target ~60 FPS
+	frameDelay := time.Second / 60
+	time.Sleep(frameDelay)
+
 	clear()
 
 	var innerJoined []string
@@ -92,23 +110,21 @@ func render() {
 	out := strings.Join(innerJoined, "\n")
 	fmt.Print(out)
 
+	// prepare for next frame
 	wipeScreen()
-}
-
-func normal(f float64) int {
-	return int(math.Round(f))
+	drawAxis()
 }
 
 func setPixel(p Point) {
-
 	x := p.x - camera.x
-	y := -(p.y - camera.y) / 2
+	y := -(p.y - camera.y) / 2.0 // squash Y for aspect
 	z := p.z - camera.z
 
 	if z <= 0 {
 		return
 	}
-	scale := 40 / z
+
+	scale := 40.0 / z
 
 	screenX := int(x*scale) + sW/2
 	screenY := int(y*scale) + sH/2
@@ -126,18 +142,16 @@ func setPixel(p Point) {
 }
 
 func setShape(s Shape) {
-
 	rotated := Rotate(s)
-
 	for _, p := range rotated.points {
 		setPixel(p)
 	}
 }
 
 func RotatePoint(p Point, rotation Rotation, center Point) Point {
-	A := rotation.A * math.Pi / 180
-	B := rotation.B * math.Pi / 180
-	C := rotation.C * math.Pi / 180
+	A := rotation.A * math.Pi / 180.0
+	B := rotation.B * math.Pi / 180.0
+	C := rotation.C * math.Pi / 180.0
 
 	cA, sA := math.Cos(A), math.Sin(A)
 	cB, sB := math.Cos(B), math.Sin(B)
@@ -168,7 +182,6 @@ func RotatePoint(p Point, rotation Rotation, center Point) Point {
 }
 
 func Rotate(s Shape) Shape {
-
 	var cx, cy, cz float64
 	for _, p := range s.points {
 		cx += p.x
@@ -186,59 +199,67 @@ func Rotate(s Shape) Shape {
 	for _, p := range s.points {
 		result.points = append(result.points, RotatePoint(p, s.rotation, center))
 	}
-
 	return result
 }
 
 func generateCubeSurfaces(size float64, density float64) []Point {
+	// Using background colors from fatih/color
+	red := color.New(color.BgHiRed).SprintFunc()
+	blue := color.New(color.BgHiBlue).SprintFunc()
+	white := color.New(color.BgHiWhite).SprintFunc()
+	green := color.New(color.BgHiGreen).SprintFunc()
+	yellow := color.New(color.BgHiYellow).SprintFunc()
+	magenta := color.New(color.BgHiMagenta).SprintFunc()
+	char := " "
 
-	chars := []string{"#", "@", "+", "x", "o", "%"}
+	chars := []string{
+		red(char),     // front
+		blue(char),    // back
+		green(char),   // right
+		yellow(char),  // left
+		white(char),   // top
+		magenta(char), // bottom
+	}
+
 	points := []Point{}
+	half := size / 2.0
 
-	half := size / 2
-
-	for i, char := range chars {
+	for i, ch := range chars {
 		switch i {
-
-		case 0:
+		case 0: // front z = +half
 			for x := -half; x <= half; x += density {
 				for y := -half; y <= half; y += density {
-					points = append(points, Point{x, y, half, char})
+					points = append(points, Point{x, y, half, ch})
 				}
 			}
-
-		case 1:
+		case 1: // back z = -half
 			for x := -half; x <= half; x += density {
 				for y := -half; y <= half; y += density {
-					points = append(points, Point{x, y, -half, char})
+					points = append(points, Point{x, y, -half, ch})
 				}
 			}
-
-		case 2:
+		case 2: // right x = +half
 			for z := -half; z <= half; z += density {
 				for y := -half; y <= half; y += density {
-					points = append(points, Point{half, y, z, char})
+					points = append(points, Point{half, y, z, ch})
 				}
 			}
-
-		case 3:
+		case 3: // left x = -half
 			for z := -half; z <= half; z += density {
 				for y := -half; y <= half; y += density {
-					points = append(points, Point{-half, y, z, char})
+					points = append(points, Point{-half, y, z, ch})
 				}
 			}
-
-		case 4:
+		case 4: // top y = +half
 			for x := -half; x <= half; x += density {
 				for z := -half; z <= half; z += density {
-					points = append(points, Point{x, half, z, char})
+					points = append(points, Point{x, half, z, ch})
 				}
 			}
-
-		case 5:
+		case 5: // bottom y = -half
 			for x := -half; x <= half; x += density {
 				for z := -half; z <= half; z += density {
-					points = append(points, Point{x, -half, z, char})
+					points = append(points, Point{x, -half, z, ch})
 				}
 			}
 		}
@@ -249,8 +270,16 @@ func generateCubeSurfaces(size float64, density float64) []Point {
 
 func generatePyramidSurfaces(size, density float64) []Point {
 	points := []Point{}
-	half := size / 2
+	half := size / 2.0
 
+	// base square on y=0
+	for x := -half; x <= half; x += density {
+		for z := -half; z <= half; z += density {
+			points = append(points, Point{x, 0, z, "#"})
+		}
+	}
+
+	// triangular faces
 	base := []Point{
 		{-half, 0, -half, "#"}, // back-left
 		{half, 0, -half, "#"},  // back-right
@@ -259,14 +288,6 @@ func generatePyramidSurfaces(size, density float64) []Point {
 	}
 	apex := Point{0, size, 0, "#"}
 
-	// Base (square)
-	for x := -half; x <= half; x += density {
-		for z := -half; z <= half; z += density {
-			points = append(points, Point{x, 0, z, "#"})
-		}
-	}
-
-	// 4 triangular faces
 	faces := []struct {
 		a, b, c Point
 		char    string
@@ -292,10 +313,24 @@ func generatePyramidSurfaces(size, density float64) []Point {
 }
 
 func main() {
+	// encourage color output on Windows terminals (helps PowerShell/Windows Terminal)
+	color.NoColor = false
 
+	// determine terminal size
+	initTerminalSize()
+	wipeScreen()
+
+	// set initial camera
+	camera = Point{
+		x: 0,
+		y: 0,
+		z: 20,
+	}
+
+	// build cube
 	var cubeSize = sW / 5
 	cube := Shape{
-		points: generateCubeSurfaces(float64(cubeSize), 0.5),
+		points: generateCubeSurfaces(float64(cubeSize), 0.2),
 		rotation: Rotation{
 			A: 0,
 			B: 0,
@@ -303,35 +338,36 @@ func main() {
 		},
 	}
 
+	// push cube forward a bit so it's visible
 	for i := range cube.points {
-		cube.points[i].z += float64(cubeSize) * 2
+		cube.points[i].z += float64(cubeSize) * 2.0
 	}
 
-	var speed float64 = 3
-
-	fmt.Printf("Please enter cube rotation speed (0 < r < 40): ")
-	fmt.Scanf("%f", &speed)
+	var speed float64 = 3.0
+	fmt.Printf("Please enter cube rotation speed (0 < r < 40) [default 3]: ")
+	_, err := fmt.Scanf("%f", &speed)
+	if err != nil {
+		speed = 3.0
+	}
 
 	for {
+		// update rotation
+		cube.rotation.A += 3.0 * speed
+		cube.rotation.B += 1.0 * speed
+		cube.rotation.C += 1.0 * speed
 
-		cube.rotation.A += float64(speed)
-		cube.rotation.B += float64(speed)
-		cube.rotation.C += float64(speed)
-
-		t := float64(time.Now().UnixNano()) / 1e9 // time in seconds
+		// camera movement (circular-ish)
+		t := float64(time.Now().UnixNano()) / 1e9
 		radius := 50.0
-		camSpeed := 1.0 // rotation camSpeed (radians per second)
-		min := 20.0
+		camSpeed := 1.0 // radians per second
+		minZ := 20.0
 
-		// make the camera move in a circle around the origin
-		camera.z = radius * math.Sin(camSpeed*t)
-
-		if camera.z < min {
-			camera.z = min
+		camera.z = radius * math.Abs(math.Sin(camSpeed*t)) // keep positive
+		if camera.z < minZ {
+			camera.z = minZ
 		}
 
 		setShape(cube)
 		render()
-
 	}
 }
